@@ -1,5 +1,6 @@
 const Zigbee2mqttHelper = require('../lib/Zigbee2mqttHelper.js');
 var Viz = require('viz.js');
+var { once } = require('events');
 var { Module, render } = require('viz.js/full.render.js');
 
 module.exports = function (RED) {
@@ -361,7 +362,7 @@ module.exports = function (RED) {
         }
 
 
-        refreshMap(wait = false, engine = null) {
+        async refreshMap(engine = null) {
             var node = this;
 
             node.log('Refreshing map and waiting...');
@@ -369,14 +370,9 @@ module.exports = function (RED) {
                 topic: node.getBaseTopic() + "/bridge/networkmap",
                 payload: 'graphviz'
             });
-
-            return new Promise((resolve, reject) => {
-                node.once('onMQTTBridgeNetworkGraphviz', message => {
-                    node.graphviz(message, engine).then(data => {
-                        resolve({ "success": true, "svg": data });
-                    });
-                });
-            });
+            var messages = await once(node, 'onMQTTBridgeNetworkGraphviz');
+            var svg = await node.graphviz(messages[0], engine);
+            return { "success": true, "svg": svg };
         }
 
         async graphviz(payload, engine = null) {

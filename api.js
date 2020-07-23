@@ -177,7 +177,7 @@ module.exports = function(RED) {
 
             // res.json( controller.refreshMap(true));
 
-            controller.refreshMap(true, config.engine).then(function(response){
+            controller.refreshMap(config.engine).then(function(response){
                 res.json(response);
             }).catch(error => {
                 res.status(404).end();
