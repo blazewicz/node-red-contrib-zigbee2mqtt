@@ -58,26 +58,20 @@ module.exports = function (RED) {
             });
         }
 
-        getDevices(callback, forceRefresh = false, withGroups = false) {
+        async getDevices(forceRefresh = false, withGroups = false) {
             var node = this;
 
             if (forceRefresh || node.devices === undefined) {
-                Promise.all([
+                node.refreshDevices();
+                await Promise.all([
                     once(node, 'onMQTTBridgeConfigGroups'),
                     once(node, 'onMQTTBridgeConfigDevices')
-                ]).then(() => {
-                    callback(withGroups ? [node.devices, node.groups] : node.devices)
-                });
-
-                node.refreshDevices();
+                ])
             } else {
                 // console.log(node.devices);
                 node.log('Using cached devices');
-                if (typeof (callback) === "function") {
-                    callback(withGroups?[node.devices, node.groups]:node.devices);
-                }
-                return withGroups?[node.devices, node.groups]:node.devices;
             }
+            return withGroups ? [node.devices, node.groups] : node.devices;
         }
 
 

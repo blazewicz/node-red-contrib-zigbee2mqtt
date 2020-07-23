@@ -18,13 +18,13 @@ module.exports = function(RED) {
         var forceRefresh = config.forceRefresh ? ['1', 'yes', 'true'].includes(config.forceRefresh.toLowerCase()) : false;
 
         if (controller && controller.constructor.name === "ServerNode") {
-            controller.getDevices(function (items) {
+            controller.getDevices(forceRefresh, true).then(items => {
                 if (items) {
                     res.json(items);
                 } else {
                     res.status(404).end();
                 }
-            }, forceRefresh, true);
+            });
         } else {
             res.status(404).end();
         }
