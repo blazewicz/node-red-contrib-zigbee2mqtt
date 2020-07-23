@@ -63,10 +63,24 @@ module.exports = function (RED) {
 
             if (forceRefresh || node.devices === undefined) {
                 node.refreshDevices();
-                await Promise.all([
-                    once(node, 'onMQTTBridgeConfigGroups'),
-                    once(node, 'onMQTTBridgeConfigDevices')
-                ])
+
+                let timeoutHandle;
+                try {
+                    await Promise.race([
+                        Promise.all([
+                            once(node, 'onMQTTBridgeConfigGroups'),
+                            once(node, 'onMQTTBridgeConfigDevices')
+                        ]),
+                        new Promise((resolve, reject) => {
+                            timeoutHandle = setTimeout(() => {
+                                node.error('Timeout waiting for devices update');
+                                reject(new Error('timeout'));
+                            }, 10_000);
+                        })
+                    ]);
+                } finally {
+                    clearTimeout(timeoutHandle);
+                }
             } else {
                 // console.log(node.devices);
                 node.log('Using cached devices');

@@ -24,6 +24,8 @@ module.exports = function(RED) {
                 } else {
                     res.status(404).end();
                 }
+            }).catch(error => {
+                res.status(408).end();
             });
         } else {
             res.status(404).end();
