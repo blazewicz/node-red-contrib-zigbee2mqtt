@@ -1,5 +1,4 @@
 const Zigbee2mqttHelper = require('../lib/Zigbee2mqttHelper.js');
-var mqtt = require('mqtt');
 var Viz = require('viz.js');
 var { Module, render } = require('viz.js/full.render.js');
 
@@ -10,7 +9,9 @@ module.exports = function (RED) {
 
             var node = this;
             node.config = n;
-            node.connection = false;
+            node.broker = node.config.broker;
+            node.brokerConn = RED.nodes.getNode(node.broker);
+            node.config.qos = node.config.qos || 2
             node.topic = node.config.base_topic+'/#';
             node.items = undefined;
             node.groups = undefined;
@@ -19,136 +20,66 @@ module.exports = function (RED) {
             node.bridge_config = null;
             node.bridge_state = null;
             node.map = null;
-            node.on('close', () => this.onClose());
+            node.on('close', done => this.onClose(done));
+
             node.setMaxListeners(0);
 
-            //mqtt
-            node.mqtt = node.connectMQTT();
-            node.mqtt.on('connect', () => this.onMQTTConnect());
-            node.mqtt.on('message', (topic, message) => this.onMQTTMessage(topic, message));
+            if (node.brokerConn) {
+                node.brokerConn.register(node);
+                node.brokerConn.subscribe(node.topic, node.config.qos,
+                    (topic, payload, packet) => node.onMQTTMessage(topic, payload, packet), node.id);
+                node.brokerConn.client.on('connect', () => {
+                    node.log('Broker connected');
+                    node.emit('onMQTTConnect');
+                    node.refreshDevices();
+                });
+                node.log('Broker registered')
+            } else {
+                node.error('Missing broker configuration')
+            }
 
-            node.mqtt.on('close', () => this.onMQTTClose());
-            node.mqtt.on('end', () => this.onMQTTEnd());
-            node.mqtt.on('reconnect', () => this.onMQTTReconnect());
-            node.mqtt.on('offline', () => this.onMQTTOffline());
-            node.mqtt.on('disconnect', (error) => this.onMQTTDisconnect(error));
-            node.mqtt.on('error', (error) => this.onMQTTError(error));
 
             // console.log(node.config._users);
         }
 
-        connectMQTT(clientId = null) {
+        refreshDevices() {
             var node = this;
-            var options = {
-                port: node.config.mqtt_port||1883,
-                username: node.config.mqtt_username||null,
-                password: node.config.mqtt_password||null,
-                clientId:"NodeRed-"+node.id+(clientId?"-"+clientId:"")
-            };
 
-            let baseUrl='mqtt://';
+            node.log('Requesting groups and devices lists');
 
-            var tlsNode = RED.nodes.getNode(node.config.tls);
-            if (node.config.usetls && tlsNode) {
-                tlsNode.addTLSOptions(options);
-                baseUrl='mqtts://';
-            }
-
-            return mqtt.connect( baseUrl + node.config.host, options);
-        }
-
-
-        subscribeMQTT() {
-            var node = this;
-            node.mqtt.subscribe(node.topic, function (err) {
-                if (err) {
-                    node.warn('MQTT Error: Subscribe to "' + node.topic);
-                    node.emit('onConnectError', err);
-                } else {
-                    node.log('MQTT Subscribed to: "' + node.topic);
-                }
-            })
-        }
-
-        unsubscribeMQTT() {
-            var node = this;
-            node.log('MQTT Unsubscribe from mqtt topic: ' + node.topic);
-            node.mqtt.unsubscribe(node.topic, function (err) {});
-            node.devices_values = [];
+            node.brokerConn.publish({
+                topic: node.getBaseTopic() + "/bridge/config/groups",
+                payload: ""
+            });
+            node.brokerConn.publish({
+                topic: node.getBaseTopic() + "/bridge/config/devices",
+                payload: ""
+            });
         }
 
         getDevices(callback, forceRefresh = false, withGroups = false) {
             var node = this;
 
             if (forceRefresh || node.devices === undefined) {
-                node.log('Refreshing devices');
-                node.groups = [];
+                var groupsUpdated = false;
+                var devicesUpdated = false;
 
-                var timeout = null;
-                var timeout_ms = 5000;
-
-
-                var client = node.connectMQTT('tmp');
-                client.on('connect', function () {
-
-                    //end function after timeout, if now response
-                    timeout = setTimeout(function(){
-                        client.end(true);
-                    }, timeout_ms);
-
-                    client.subscribe(node.topic, function (err) {
-                        if (!err) {
-                            // node.mqtt.publish(node.getBaseTopic() + "/bridge/config/groups", new Date().getTime() + "");
-                            client.publish(node.getBaseTopic() + "/bridge/config/groups", new Date().getTime() + "");
-                            client.publish(node.getBaseTopic() + "/bridge/config/devices/get", new Date().getTime() + "");
-                        } else {
-                            RED.log.error("zigbee2mqtt: error code #0023: " + err);
-                            client.end(true);
-                        }
-                    })
-                });
-
-                client.on('error', function (error) {
-                    RED.log.error("zigbee2mqtt: error code #0024: " + error);
-                    client.end(true);
-                });
-
-                client.on('end', function (error, s) {
-                    // console.log('END');
-                    clearTimeout(timeout);
-
-                    if (typeof (callback) === "function") {
-                        callback(withGroups?[node.devices, node.groups]:node.devices);
+                function update () {
+                    if (devicesUpdated && groupsUpdated) {
+                        callback(withGroups ? [node.devices, node.groups] : node.devices);
                     }
-                    return withGroups?[node.devices, node.groups]:node.devices;
+                }
+
+                node.once('onMQTTBridgeConfigGroups', () => {
+                    groupsUpdated = true;
+                    update();
+                });
+                node.once('onMQTTBridgeConfigDevices', () => {
+                    devicesUpdated = true;
+                    update();
                 });
 
-                client.on('message', function (topic, message) {
-                    if (node.getBaseTopic() + "/bridge/state" == topic) {
-                        node.bridge_state = message.toString();
-                        if (message.toString() != "online") {
-                            RED.log.error("zigbee2mqtt: bridge status: " + message.toString());
-                        }
-
-                    } else if (node.getBaseTopic()+'/bridge/log' == topic) {
-                        var messageString = message.toString();
-                        if (Zigbee2mqttHelper.isJson(messageString)) {
-                            var payload = JSON.parse(messageString);
-                            if ("type" in payload) {
-                                if ("groups" == payload.type) {
-                                    node.groups = payload.message;
-                                }
-                            }
-                        }
-
-                    } else if (node.getBaseTopic()+'/bridge/config' == topic) {
-                        node.bridge_config = JSON.parse(message.toString());
-
-                    } else if (node.getBaseTopic() + "/bridge/config/devices" == topic) {
-                        node.devices = JSON.parse(message.toString());
-                        client.end(true);
-                    }
-                })
+                node.refreshDevices();
             } else {
                 // console.log(node.devices);
                 node.log('Using cached devices');
@@ -244,14 +175,20 @@ module.exports = function (RED) {
         setLogLevel(val) {
             var node = this;
             if (['info', 'debug', 'warn', 'error'].indexOf(val) < 0) val = 'info';
-            node.mqtt.publish(node.getBaseTopic() + "/bridge/config/log_level", val);
+            node.brokerConn.publish({
+                topic: node.getBaseTopic() + "/bridge/config/log_level",
+                payload: val
+            });
             node.log('Log Level set to: '+val);
         }
 
         setPermitJoin(val) {
             var node = this;
             val = val?"true":"false";
-            node.mqtt.publish(node.getBaseTopic() + "/bridge/config/permit_join", val);
+            node.brokerConn.publish({
+                topic: node.getBaseTopic() + "/bridge/config/permit_join",
+                payload: val
+            });
             node.log('Permit Join set to: '+val);
         }
 
@@ -272,7 +209,10 @@ module.exports = function (RED) {
                 "new":newName
             };
 
-            node.mqtt.publish(node.getBaseTopic() + "/bridge/config/rename", JSON.stringify(payload));
+            node.brokerConn.publish({
+                topic: node.getBaseTopic() + "/bridge/config/rename",
+                payload: JSON.stringify(payload)
+            });
             node.log('Rename device '+ieeeAddr+' to '+newName);
 
             return {"success":true,"description":"command sent"};
@@ -286,7 +226,10 @@ module.exports = function (RED) {
                 return {"error":true,"description":"no such device"};
             }
 
-            node.mqtt.publish(node.getBaseTopic() + "/bridge/config/force_remove", device.friendly_name);
+            node.brokerConn.publish({
+                topic: node.getBaseTopic() + "/bridge/config/force_remove",
+                payload: device.friendly_name
+            });
             node.log('Remove device: '+device.friendly_name);
 
             return {"success":true,"description":"command sent"};
@@ -305,7 +248,10 @@ module.exports = function (RED) {
             payload['options'] = options;
 
 
-            node.mqtt.publish(node.getBaseTopic() + "/bridge/config/device_options", JSON.stringify(payload));
+            node.brokerConn.publish({
+                topic: node.getBaseTopic() + "/bridge/config/device_options",
+                payload: JSON.stringify(payload)
+            });
             node.log('Set device options: '+JSON.stringify(payload));
 
             return {"success":true,"description":"command sent"};
@@ -329,7 +275,10 @@ module.exports = function (RED) {
                 "new":newName
             };
 
-            node.mqtt.publish(node.getBaseTopic() + "/bridge/config/rename", JSON.stringify(payload));
+            node.brokerConn.publish({
+                topic: node.getBaseTopic() + "/bridge/config/rename",
+                payload: JSON.stringify(payload)
+            });
             node.log('Rename group '+id+' to '+newName);
 
             return {"success":true,"description":"command sent"};
@@ -343,7 +292,10 @@ module.exports = function (RED) {
                 return {"error":true,"description":"no such group"};
             }
 
-            node.mqtt.publish(node.getBaseTopic() + "/bridge/config/remove_group", group.friendly_name);
+            node.brokerConn.publish({
+                topic: node.getBaseTopic() + "/bridge/config/remove_group",
+                payload: group.friendly_name
+            });
             node.log('Remove group: '+group.friendly_name);
 
             return {"success":true,"description":"command sent"};
@@ -352,7 +304,10 @@ module.exports = function (RED) {
         addGroup(name) {
             var node = this;
 
-            node.mqtt.publish(node.getBaseTopic() + "/bridge/config/add_group", name);
+            node.brokerConn.publish({
+                topic: node.getBaseTopic() + "/bridge/config/add_group",
+                payload: name
+            });
             node.log('Add group: '+name);
 
             return {"success":true,"description":"command sent"};
@@ -372,7 +327,10 @@ module.exports = function (RED) {
                 return {"error":true,"description":"no such group"};
             }
 
-            node.mqtt.publish(node.getBaseTopic() + "/bridge/group/"+group.friendly_name+"/remove", device.friendly_name);
+            node.brokerConn.publish({
+                topic: node.getBaseTopic() + "/bridge/group/"+group.friendly_name+"/remove",
+                payload: device.friendly_name
+            });
             node.log('Removing device: '+device.friendly_name  + ' from group: '+group.friendly_name);
 
             return {"success":true,"description":"command sent"};
@@ -393,70 +351,31 @@ module.exports = function (RED) {
                 return {"error":true,"description":"no such group"};
             }
 
-            node.mqtt.publish(node.getBaseTopic() + "/bridge/group/"+group.friendly_name+"/add", device.friendly_name);
+            node.brokerConn.publish({
+                topic: node.getBaseTopic() + "/bridge/group/" + group.friendly_name + "/add",
+                payload: device.friendly_name
+            });
             node.log('Adding device: '+device.friendly_name+ ' to group: '+group.friendly_name);
 
             return {"success":true,"description":"command sent"};
         }
 
 
-
-         refreshMap(wait = false, engine = null) {
+        refreshMap(wait = false, engine = null) {
             var node = this;
 
+            node.log('Refreshing map and waiting...');
+            node.brokerConn.publish({
+                topic: node.getBaseTopic() + "/bridge/networkmap",
+                payload: 'graphviz'
+            });
 
-            return new Promise(function (resolve, reject) {
-                if (wait) {
-                    var timeout = null;
-                    var timeout_ms = 60000 * 5;
-
-                    var client = node.connectMQTT('tmp');
-                    client.on('connect', function () {
-
-                        //end function after timeout, if now response
-                        timeout = setTimeout(function () {
-                            client.end(true);
-                        }, timeout_ms);
-                        client.subscribe(node.getBaseTopic() + "/bridge/networkmap/graphviz", function (err) {
-                            if (!err) {
-                                client.publish(node.getBaseTopic() + "/bridge/networkmap", 'graphviz');
-                                node.log('Refreshing map and waiting...');
-                            } else {
-                                RED.log.error("zigbee2mqtt: error code #0023: " + err);
-                                client.end(true);
-                                reject({'success':false, 'description':'zigbee2mqtt: error code #0023'});
-                            }
-                        })
+            return new Promise((resolve, reject) => {
+                node.once('onMQTTBridgeNetworkGraphviz', message => {
+                    node.graphviz(message, engine).then(data => {
+                        resolve({ "success": true, "svg": data });
                     });
-
-                    client.on('error', function (error) {
-                        RED.log.error("zigbee2mqtt: error code #0024: " + error);
-                        client.end(true);
-                        reject({'success':false, 'description':'zigbee2mqtt: error code #0024'});
-                    });
-
-                    client.on('end', function (error, s) {
-                        clearTimeout(timeout);
-                    });
-
-                    client.on('message', function (topic, message) {
-                        if (node.getBaseTopic() + "/bridge/networkmap/graphviz" == topic) {
-
-                            var messageString = message.toString();
-                            node.graphviz(messageString, engine).then(function (data) {
-                                resolve({"success": true, "svg": node.map});
-                            }).catch(error => {
-                                reject({'success':false, 'description':'graphviz failed'});
-                            });
-                            client.end(true);
-                        }
-                    })
-                } else {
-                    node.mqtt.publish(node.getBaseTopic() + "/bridge/networkmap", 'graphviz');
-                    node.log('Refreshing map...');
-
-                    resolve({"success": true, "svg": node.map});
-                }
+                });
             });
         }
 
@@ -470,84 +389,28 @@ module.exports = function (RED) {
             return node.map = await viz.renderString(payload,options);
         }
 
-        onMQTTConnect() {
+
+        onMQTTMessage(topic, payload, _packet) {
             var node = this;
-            node.connection = true;
-            node.log('MQTT Connected');
-            node.emit('onMQTTConnect');
-            node.getDevices(function(){
-                node.subscribeMQTT();
-            });
-
-        }
-
-        onMQTTDisconnect(error) {
-            var node = this;
-            // node.connection = true;
-            node.log('MQTT Disconnected');
-            console.log(error);
-
-        }
-
-        onMQTTError(error) {
-            var node = this;
-            // node.connection = true;
-            node.log('MQTT Error');
-            console.log(error);
-
-        }
-
-        onMQTTOffline() {
-            var node = this;
-            // node.connection = true;
-            node.log('MQTT Offline');
-            console.log("MQTT OFFLINE");
-
-        }
-
-        onMQTTEnd() {
-            var node = this;
-            // node.connection = true;
-            node.log('MQTT End');
-            // console.log();
-
-        }
-
-        onMQTTReconnect() {
-            var node = this;
-            // node.connection = true;
-            node.log('MQTT Reconnect');
-            // console.log();
-
-        }
-
-        onMQTTClose() {
-            var node = this;
-            // node.connection = true;
-            node.log('MQTT Close');
-            // console.log(node.connection);
-
-        }
-
-        onMQTTMessage(topic, message) {
-            var node = this;
-            var messageString = message.toString();
+            var messageString = payload.toString();
 
 
             //bridge
             if (topic.search(new RegExp(node.getBaseTopic()+'\/bridge\/')) === 0) {
-                if (node.getBaseTopic() + '/bridge/config/devices' == topic) {
-                    node.devices = JSON.parse(messageString);
-                } else if (node.getBaseTopic() + '/bridge/state' == topic) {
+                if (node.getBaseTopic() + '/bridge/state' == topic) {
+                    node.bridge_state = messageString;
+                    if (node.bridge_state != "online") {
+                        node.error("bridge status: " + messageString);
+                    }
                     node.emit('onMQTTBridgeState', {
                         topic: topic,
-                        payload: message.toString() == "online"
+                        payload: messageString == "online"
                     });
                     if (message.toString() == "online") {
                         node.getDevices(null, true, true);
                     }
                 } else if (node.getBaseTopic()+'/bridge/config' == topic) {
-                    node.bridge_config = JSON.parse(message.toString());
+                    node.bridge_config = JSON.parse(messageString);
 
                 } else if (node.getBaseTopic() + '/bridge/log' == topic) {
                     if (Zigbee2mqttHelper.isJson(messageString)) {
@@ -559,24 +422,33 @@ module.exports = function (RED) {
                                 case "device_removed":
                                 case "group_renamed":
                                 case "group_removed":
-                                    node.getDevices(null, true);
-                                break;
-
+                                    node.refreshDevices();
+                                    break;
                                 case "group_added":
                                     node.setDeviceOptions(payload.message, {"retain": true});
-                                    node.getDevices(null, true);
+                                    node.refreshDevices();
+                                    break;
+                                case "groups":
+                                    node.log('Groups list updated');
+                                    node.groups = payload.message;
+                                    node.emit('onMQTTBridgeConfigGroups', node.groups);
+                                    break;
+                                case "devices":
+                                    node.log('Devices list updated');
+                                    node.devices = payload.message;
+                                    node.emit('onMQTTBridgeConfigDevices', node.devices);
                                     break;
 
                                 case "pairing":
                                     if ("interview_successful" == payload.message) {
                                         node.setDeviceOptions(payload.meta.friendly_name, {"retain": true})
                                     }
-                                break;
+                                    break;
                             }
                         }
                     }
                 } else if (node.getBaseTopic() + '/bridge/networkmap/graphviz' == topic) {
-                    node.graphviz(messageString);
+                    node.emit('onMQTTBridgeNetworkGraphviz', messageString);
                 }
 
 
@@ -607,13 +479,18 @@ module.exports = function (RED) {
             }
         }
 
-        onClose() {
+
+        onClose(done) {
             var node = this;
-            node.unsubscribeMQTT();
-            node.mqtt.end();
-            node.connection = false;
+
+            if (node.brokerConn) {
+                node.brokerConn.unsubscribe(node.topic, node.id, removed);
+                node.brokerConn.deregister(node, done);
+                node.log('Broker unregistered');
+            }
+
             node.emit('onClose');
-            node.log('MQTT connection closed');
+            done();
         }
     }
 

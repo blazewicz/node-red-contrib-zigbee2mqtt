@@ -1,5 +1,4 @@
 const Zigbee2mqttHelper = require('../lib/Zigbee2mqttHelper.js');
-var mqtt = require('mqtt');
 
 module.exports = function(RED) {
     class Zigbee2mqttNodeGet {

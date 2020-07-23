@@ -1,5 +1,4 @@
 const Zigbee2mqttHelper = require('../lib/Zigbee2mqttHelper.js');
-var mqtt = require('mqtt');
 
 module.exports = function(RED) {
     class Zigbee2mqttNodeOut {
@@ -196,7 +195,10 @@ module.exports = function(RED) {
                             }
 
                             node.log('Published to mqtt topic: ' + node.server.getBaseTopic()+'/'+node.config.friendly_name + '/set : ' + JSON.stringify(toSend));
-                            node.server.mqtt.publish(node.server.getBaseTopic()+'/'+node.config.friendly_name + '/set', JSON.stringify(toSend));
+                            node.brokerConn.publish({
+                                topic: node.server.getBaseTopic()+'/'+node.config.friendly_name + '/set',
+                                payload: JSON.stringify(toSend)
+                            });
 
                             node.status({
                                 fill: "green",

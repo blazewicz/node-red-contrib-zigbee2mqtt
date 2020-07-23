@@ -1,5 +1,4 @@
 const Zigbee2mqttHelper = require('../lib/Zigbee2mqttHelper.js');
-var mqtt = require('mqtt');
 
 
 module.exports = function(RED) {
@@ -59,7 +58,10 @@ module.exports = function(RED) {
             if (node.server) {
                 node.on('input', function (message_in) {
                     node.log('Published to mqtt topic: ' + message_in.topic + ' Payload: ' + message_in.payload);
-                    node.server.mqtt.publish(message_in.topic, JSON.stringify(message_in.payload));
+                    node.brokerConn.publish({
+                        topic: message_in.topic,
+                        payload: JSON.stringify(message_in.payload)
+                    });
                 });
 
             } else {

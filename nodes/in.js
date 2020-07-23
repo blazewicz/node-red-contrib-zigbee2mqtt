@@ -1,5 +1,4 @@
 const Zigbee2mqttHelper = require('../lib/Zigbee2mqttHelper.js');
-var mqtt = require('mqtt');
 var TimeAgo = require('javascript-time-ago');
 var TimeAgoEn = require('javascript-time-ago/locale/en');
 TimeAgo.addLocale(TimeAgoEn);
