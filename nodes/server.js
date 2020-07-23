@@ -353,8 +353,24 @@ module.exports = function (RED) {
                 topic: node.getBaseTopic() + "/bridge/networkmap",
                 payload: 'graphviz'
             });
-            var messages = await once(node, 'onMQTTBridgeNetworkGraphviz');
-            var svg = await node.graphviz(messages[0], engine);
+
+            var timeoutHandle;
+            var messages;
+            try {
+                messages = await Promise.race([
+                    once(node, 'onMQTTBridgeNetworkGraphviz'),
+                    new Promise((resolve, reject) => {
+                        timeoutHandle = setTimeout(() => {
+                            node.error('Timeout waiting for map update');
+                            reject(new Error('timeout'));
+                        }, 120_000);
+                    })
+                ]);
+            } finally {
+                clearTimeout(timeoutHandle);
+            }
+
+            const svg = await node.graphviz(messages[0], engine);
             return { "success": true, "svg": svg };
         }
 

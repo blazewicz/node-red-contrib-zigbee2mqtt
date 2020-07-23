@@ -180,7 +180,7 @@ module.exports = function(RED) {
             controller.refreshMap(config.engine).then(function(response){
                 res.json(response);
             }).catch(error => {
-                res.status(404).end();
+                res.status(408).end();
             });
         } else {
             res.status(404).end();
