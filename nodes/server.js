@@ -62,22 +62,11 @@ module.exports = function (RED) {
             var node = this;
 
             if (forceRefresh || node.devices === undefined) {
-                var groupsUpdated = false;
-                var devicesUpdated = false;
-
-                function update () {
-                    if (devicesUpdated && groupsUpdated) {
-                        callback(withGroups ? [node.devices, node.groups] : node.devices);
-                    }
-                }
-
-                node.once('onMQTTBridgeConfigGroups', () => {
-                    groupsUpdated = true;
-                    update();
-                });
-                node.once('onMQTTBridgeConfigDevices', () => {
-                    devicesUpdated = true;
-                    update();
+                Promise.all([
+                    once(node, 'onMQTTBridgeConfigGroups'),
+                    once(node, 'onMQTTBridgeConfigDevices')
+                ]).then(() => {
+                    callback(withGroups ? [node.devices, node.groups] : node.devices)
                 });
 
                 node.refreshDevices();
