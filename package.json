@@ -9,10 +9,12 @@
   "bundleDependencies": false,
   "dependencies": {
     "eventsource": "^0.2.1",
+    "javascript-time-ago": "^2.0.7",
+    "jquery": "^3.5.1",
     "multiple-select": "^1.4.1",
+    "node-red": "^1.1.2",
     "request": "^2.81.0",
-    "viz.js": "^2.1.2",
-    "javascript-time-ago": "^2.0.7"
+    "viz.js": "^2.1.2"
   },
   "deprecated": false,
   "description": "Zigbee2mqtt connectivity nodes for node-red",

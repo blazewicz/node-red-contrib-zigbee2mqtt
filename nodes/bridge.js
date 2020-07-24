@@ -63,7 +63,6 @@ module.exports = function(RED) {
                         payload: JSON.stringify(message_in.payload)
                     });
                 });
-
             } else {
                 node.status({
                     fill: "red",
@@ -219,9 +218,8 @@ module.exports = function(RED) {
                 });
             } else if (node.server.getBaseTopic()+'/bridge/log' == data.topic) {
 
-                if (Zigbee2mqttHelper.isJson(data.payload)) {
-                    var parsedData = JSON.parse(data.payload);
-
+                const parsedData = Zigbee2mqttHelper.tryJson(data.payload);
+                if (parsedData) {
                     if ("type" in parsedData) {
                         if ("device_connected" == parsedData.type) {
                             node.status({

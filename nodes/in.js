@@ -3,9 +3,6 @@ var TimeAgo = require('javascript-time-ago');
 var TimeAgoEn = require('javascript-time-ago/locale/en');
 TimeAgo.addLocale(TimeAgoEn);
 
-
-
-
 module.exports = function(RED) {
     class Zigbee2mqttNodeIn {
         constructor(config) {
@@ -21,9 +18,6 @@ module.exports = function(RED) {
             node.status({}); //clean
 
             if (node.server) {
-                node.listener_onMQTTConnect = function(data) { node.onMQTTConnect(); }
-                node.server.on('onMQTTConnect', node.listener_onMQTTConnect);
-
                 node.listener_onConnectError = function(data) { node.onConnectError(); }
                 node.server.on('onConnectError', node.listener_onConnectError);
 
@@ -66,9 +60,6 @@ module.exports = function(RED) {
             clearInterval(node.refreshStatusTimer);
 
             //remove listeners
-            if (node.listener_onMQTTConnect) {
-                node.server.removeListener('onMQTTConnect', node.listener_onMQTTConnect);
-            }
             if (node.listener_onConnectError) {
                 node.server.removeListener('onConnectError', node.listener_onConnectError);
             }
@@ -82,22 +73,10 @@ module.exports = function(RED) {
             node.onConnectError();
         }
 
-        onMQTTConnect() {
-            var node = this;
-
-            // node.status({
-            //     fill: "green",
-            //     shape: "dot",
-            //     text: "node-red-contrib-zigbee2mqtt/in:status.connected"
-            // });
-            // node.cleanTimer = setTimeout(function () {
-            //     node.status({}); //clean
-            // }, 3000);
-        }
-
         onMQTTMessage(data) {
             var node = this;
 
+            node.log(JSON.stringify(data));
 
             if ( (data.device && "ieeeAddr" in data.device && data.device.ieeeAddr == node.config.device_id)
             || (data.group && "ID" in data.group && data.group.ID == node.config.device_id) ) {
