@@ -1,4 +1,4 @@
-const Zigbee2mqttHelper = require('../lib/Zigbee2mqttHelper.js');
+const { payload2homekit } = require('../lib/Zigbee2mqttHelper.js');
 var TimeAgo = require('javascript-time-ago');
 var TimeAgoEn = require('javascript-time-ago/locale/en');
 TimeAgo.addLocale(TimeAgoEn);
@@ -74,7 +74,7 @@ module.exports = function(RED) {
         }
 
         onMQTTMessage(data) {
-            var node = this;
+            const node = this;
 
             node.log(JSON.stringify(data));
 
@@ -91,18 +91,16 @@ module.exports = function(RED) {
                     return;
                 }
 
-
                 if (data.device) {
-                    var homekit_payload = Zigbee2mqttHelper.payload2homekit(data.payload, data.device);
-                    var format_payload = Zigbee2mqttHelper.formatPayload(data.payload, data.device);
+                    var homekit_payload = payload2homekit(data.payload, data.device);
+                    var format_payload = formatPayload(data.payload, data.device);
                 } else if (data.group) {
-                    var homekit_payload = Zigbee2mqttHelper.payload2homekit(data.payload, data.group);
-                    var format_payload = Zigbee2mqttHelper.formatPayload(data.payload, data.group);
+                    var homekit_payload = payload2homekit(data.payload, data.group);
+                    var format_payload = formatPayload(data.payload, data.group);
                 } else {
                     var homekit_payload = null;
                     var format_payload = null;
                 }
-
 
                 var payload = data.payload;
                 if (parseInt(node.config.state) != 0) {
